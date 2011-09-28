@@ -332,15 +332,7 @@ object Group {
       import DeepZipper._
       
       def builder(parent: Option[Group[_ <: Node]], contexts: Vector[LocationContext], emptiesSet: EmptiesSet) = {
-        Vector.newBuilder[A] mapResult { res =>
-          val nodeContexts = (contexts zip res) map { cn => 
-            val (context, node) = cn
-            import context._
-            val nodeLoc = NodeLoc(node, loc)
-            FullContext(nodeLoc, parentsList, updateTime)
-          }
-          fromContexts(parent, nodeContexts, emptiesSet)
-        }
+        VectorCase.newBuilder[A] mapResult { fromContexts(parent, _, contexts, emptiesSet)}
       }
       
       def apply(parent: Option[Group[_ <: Node]], contexts: Vector[LocationContext], emptiesSet: EmptiesSet) = {

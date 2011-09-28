@@ -17,7 +17,7 @@ trait DeepZipper[+A <: Node] extends Group[A] with IndexedSeqLike[A, DeepZipper[
    * All the vectors beneath should have the same length.
    */
   
-  private type FullContext = DeepZipper.FullContext[Node]
+  private type LocationContext = DeepZipper.LocationContext
   
   /** Transforming a node with its update time into a sequence of nodes with an overall update time. */
   private type NodeTransform = Node => (Seq[Node], Time)
@@ -54,26 +54,27 @@ trait DeepZipper[+A <: Node] extends Group[A] with IndexedSeqLike[A, DeepZipper[
   protected def emptiesSet: EmptiesSet
 
   /** The full context list of the zipper. */
-  private lazy val fullContext = {
-    val nodesWithLocs: Vector[NodeLoc[Node]] = (self.toVector zip locations).map(Function.tupled(NodeLoc[A]))
+  private lazy val locationContext = {
+    //TODO - clean
+    //val nodesWithLocs: Vector[NodeLoc[Node]] = (self.toVector zip locations).map(Function.tupled(NodeLoc[A]))
 
     // constructing a vector of full context objects from the vectorized constituents
-    val nodesWithContext =
-      for (i <- nodesWithLocs.indices; val updateTime = updateTimes(i)) yield {
-        FullContext(nodesWithLocs(i), parentLists(i), updateTime)
+    val res =
+      for (i <- locations.indices; val updateTime = updateTimes(i)) yield {
+        LocationContext(locations(i), parentLists(i), updateTime)
       }
 
-    nodesWithContext
+    res
   }
   
   /** Applying the node updates. */
   lazy val unselect: DeepZipper[Node] = {
-    val (fullContext, transforms) = unselectionData
+    val (locationContext, transforms) = unselectionData
     
-    if (fullContext.isEmpty && transforms.isEmpty) parentOrError // no updates
+    if (locationContext.isEmpty && transforms.isEmpty) parentOrError // no updates
     else {
       // grouping the nodes by their depth in the tree
-      val byDepthContexts = fullContext.groupBy(_.parentsList.length) withDefaultValue Vector()
+      val byDepthContexts = locationContext.groupBy(_.parentsList.length) withDefaultValue Vector()
       val byDepthTransforms = transforms.groupBy(_._1.parentsList.length) withDefaultValue Map()
 
       val newZipper = mergeContext(byDepthContexts, byDepthTransforms)
@@ -201,7 +202,7 @@ trait DeepZipper[+A <: Node] extends Group[A] with IndexedSeqLike[A, DeepZipper[
    *  * In addition to the above transforms, transforms for locations that were removed from the zipper are also provided (to remove the nodes from these locations). 
    *  
    *  The unselection data is composed from the non duplicate contexts and the transformation functions. */
-  private def unselectionData: (Vector[FullContext], Map[FullLoc, NodeTransform]) = {
+  private def unselectionData: (Vector[LocationContext], Map[FullLoc, NodeTransform]) = {
     val (contexts, transforms) = contextsWithTransforms
     val allTransforms = transforms ++ emptyTransforms
     (contexts, allTransforms)
@@ -209,10 +210,10 @@ trait DeepZipper[+A <: Node] extends Group[A] with IndexedSeqLike[A, DeepZipper[
 
   /** The contexts objects from the zipper after removing duplicates.
    *  The removed duplicates are returned as transforms which append the duplicates to a given node mapped to the appropriate location.*/
-  private def contextsWithTransforms: (Vector[FullContext], Map[FullLoc, NodeTransform]) = {
-    val byLoc = fullContext.groupBy(fc => FullLoc(fc.parentsList, fc.nodeLoc.loc))
+  private def contextsWithTransforms: (Vector[LocationContext], Map[FullLoc, NodeTransform]) = {
+    val byLoc = locationContext.groupBy(fc => FullLoc(fc.parentsList, fc.loc))
 
-    val initContexts = Vector[FullContext]()
+    val initContexts = Vector[LocationContext]()
     val initTransforms = Map[FullLoc, NodeTransform]()
 
     val (contexts, transforms) =
@@ -222,12 +223,17 @@ trait DeepZipper[+A <: Node] extends Group[A] with IndexedSeqLike[A, DeepZipper[
 
         val (h, t) = (entry.head, entry.tail) // entries cannot be empty as they were obtained by groupBy
 
+        //TODO - I think its true that in the old "FullContext" world, two contexts with the same FullLoc (i.e. - path)
+        // must always have the same node.   Verify this.
+        
+        // Another thing worth verifying is whether "NodeTransform" does anything more than eliding or duplicating nodes
+        // - i.e. Is this pretty much just accomplishing what my PartiotionedSequence does????
         val newContexts = cont :+ h
         val newTransforms =
           if (t.isEmpty) trans
           else {
             val transFunc = (n: Node) => {
-              val nodes = t.map(_.nodeLoc.node)
+              val nodes = t map {_ => n} //TODO - Just repeated h for t.length times...better way to do this?
               val times = t.map(_.updateTime)
               (n +: nodes, times.max) // appending extras
             }
@@ -254,7 +260,7 @@ trait DeepZipper[+A <: Node] extends Group[A] with IndexedSeqLike[A, DeepZipper[
     if (xs.isEmpty) None else Some(xs) 
   
   /** The zipper context grouped by depth in the tree. */
-  private type DepthContext = Map[Int, Seq[FullContext]]
+  private type DepthContext = Map[Int, Seq[LocationContext]]
   /** Node transforms grouped by depth in the tree. */
   private type DepthTransforms = Map[Int, Map[FullLoc, NodeTransform]]
 
@@ -299,7 +305,7 @@ trait DeepZipper[+A <: Node] extends Group[A] with IndexedSeqLike[A, DeepZipper[
   /** Taking contexts and transforms at a single depth and merging them into a list
    *  of contexts at depth -1 from the original.
    */
-  private def mergeDepth(singleDepthContexts: Seq[FullContext], singleDepthTransforms: Map[FullLoc, NodeTransform]) = {
+  private def mergeDepth(singleDepthContexts: Seq[LocationContext], singleDepthTransforms: Map[FullLoc, NodeTransform]) = {
     // the following can only be used if [[Elem]] has efficient hashing
     val contexts = singleDepthContexts.groupBy(_.parentsList) withDefaultValue Seq()
     val transforms = singleDepthTransforms.groupBy(_._1.parentsList) withDefaultValue Map()
@@ -312,13 +318,12 @@ trait DeepZipper[+A <: Node] extends Group[A] with IndexedSeqLike[A, DeepZipper[
   /** Taking contexts and transforms under a single parent's list and merging them
    *  into a single context at the same depth as the lowest parent in the parent's list.
    */
-  private def mergeParent(parents: ParentsList, contexts: Seq[FullContext], transforms: Map[FullLoc, NodeTransform]) = {
+  private def mergeParent(directParent: Elem, parents: ParentsList, contexts: Seq[LocationContext], transforms: Map[FullLoc, NodeTransform]) = {
 
     // The parent list is never empty because the merging stops at the lowest depth.
     assert(!parents.isEmpty, "Cannot merge under an empty parent.")
 
     val directParentLoc = parents.head
-    val directParent = directParentLoc.elem
     val grandParents = parents.tail
 
     val uniques = uniqueLocations(directParent, parents, contexts)
@@ -350,23 +355,23 @@ trait DeepZipper[+A <: Node] extends Group[A] with IndexedSeqLike[A, DeepZipper[
     val newParent = directParent.copy(children = newChildren)
     val newParentLoc = NodeLoc(newParent, directParentLoc.loc)
 
-    FullContext(newParentLoc, grandParents, newUpdateTime)
+    LocationContext(newParentLoc, grandParents, newUpdateTime)
   }
 
   /** Taking a sequence of contexts under the given direct parent and the given
    *  parent's list and merging nodes which represent the same location under the parent.
    *  @return A list contexts which are all unique under the given parent.
    */
-  private def uniqueLocations(directParent: Elem, parents: ParentsList, contexts: Seq[FullContext]) = {
+  private def uniqueLocations(directParent: Elem, parents: ParentsList, contexts: Seq[LocationContext]) = {
 
-    val byLocation = contexts.groupBy(_.nodeLoc.loc) // grouping by nodes by the location in the parent
+    val byLocation = contexts.groupBy(_.loc) // grouping by nodes by the location in the parent
     val locationUnique = byLocation.map { entry =>
       val (loc, context) = entry
       val origNode = directParent.children(loc) // the node before updates on the zipper
       val modNodes = context.map(c => (c.nodeLoc.node, c.updateTime))
 
       val (newNode, updateTime) = mergeDuplicates(origNode, modNodes)
-      FullContext(NodeLoc(newNode, loc), parents, updateTime)
+      LocationContext(NodeLoc(newNode, loc), parents, updateTime)
     }
     locationUnique
   }
@@ -431,7 +436,7 @@ trait DeepZipper[+A <: Node] extends Group[A] with IndexedSeqLike[A, DeepZipper[
   }
 
   /** Applying the merging strategy to full contexts at duplicate locations at the root level. */
-  private def mergeRootDuplicates(root: Map[Location, Iterable[FullContext]]) = {
+  private def mergeRootDuplicates(root: Map[Location, Iterable[LocationContext]]) = {
     val uniques = // merging duplicates
       root.map { lc =>
         val (l, c) = lc
@@ -444,7 +449,7 @@ trait DeepZipper[+A <: Node] extends Group[A] with IndexedSeqLike[A, DeepZipper[
   }
 
   /** Merges an iterable of context objects into the original group representing them. */
-  private def mergeOriginalWithContext(originals: Group[Node], contexts: Iterable[FullContext]) = {
+  private def mergeOriginalWithContext(originals: Group[Node], contexts: Iterable[LocationContext]) = {
     mergeWithOriginal(originals, contexts.map(_.nodeLoc))
   }
 
@@ -508,15 +513,7 @@ object DeepZipper {
   implicit def canBuildFromWithDeepZipper[A <: Node] = {
     new CanBuildFromWithDeepZipper[DeepZipper[_ <: Node], A, DeepZipper[A]] {
       def builder(parent: Option[DeepZipper[_ <: Node]], contexts: Vector[LocationContext], emptiesSet: EmptiesSet) = {
-        Vector.newBuilder[A] mapResult { res =>
-          val nodeContexts = (contexts zip res) map { cn => 
-            val (context, node) = cn
-            import context._
-            val nodeLoc = NodeLoc(node, loc)
-            FullContext(nodeLoc, parentsList, updateTime)
-          }
-          fromContexts(parent, nodeContexts, emptiesSet)
-        }
+        VectorCase.newBuilder[A] mapResult {fromContexts(parent, _, contexts, emptiesSet)}
       }
       
       def apply(parent: Option[DeepZipper[_ <: Node]], contexts: Vector[LocationContext], emptiesSet: EmptiesSet) = {
@@ -542,8 +539,7 @@ object DeepZipper {
    * @param parentGroup The parent of the newly created zipper.
    * @param contexts The contents of the zipper.
    * @param empties The set of empty locations in the zipper. */
-  private[antixml] def fromContexts[A <: Node](parentGroup: Option[Group[Node]], contexts: Vector[FullContext[A]], empties: EmptiesSet): DeepZipper[A] = {
-    val vals = VectorCase.fromSeq(contexts map (_.nodeLoc.node))
+  private[antixml] def fromContexts[A <: Node](parentGroup: Option[Group[Node]], vals: VectorCase[A], contexts: Vector[LocationContext], empties: EmptiesSet): DeepZipper[A] = {
     val locs = contexts map (_.nodeLoc.loc)
     val parents = contexts map (_.parentsList)
     val newUpdateTimes = contexts map (_.updateTime)
@@ -581,10 +577,10 @@ object DeepZipper {
   }
 
   /** A location of a node within its parent. */
-  private[antixml] case class NodeLoc[+A <: Node](node: A, loc: Location) 
+  //private[antixml] case class NodeLoc[+A <: Node](node: A, loc: Location) 
   
   /** Parents can only be [[Elem]]s. */
-  private[antixml] case class ParentLoc(elem: Elem, loc: Location)
+  private[antixml] case class ParentLoc(loc: Location)
   
   /** Containing any data. */
   private[antixml] case class WithLoc[+A](content: A, loc: Location)
@@ -593,11 +589,13 @@ object DeepZipper {
   private[antixml] case class FullLoc(parentsList: ParentsList, loc: Location)
 
   /** A wrapper for the full context of a [[DeepZipper]] location. */
+  /*
   private[antixml] case class FullContext[+A <: Node](
     nodeLoc: NodeLoc[A], 
     parentsList: ParentsList,
     updateTime: Time)
-
+  */
+    
   /** A [[DeepZipper]] context for a location, fully describes its surrounding without specifying the content. */
   private[antixml] case class LocationContext(
     /** The location of the context beneath its parent. */
