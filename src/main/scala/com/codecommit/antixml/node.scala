@@ -63,7 +63,10 @@ import java.io.Writer
  * <li>[[com.codecommit.antixml.EntityRef]] – An entity reference (e.g. `&amp;`)</li>
  * </ul>
  */
-sealed trait Node
+sealed trait Node {
+  /** Retuns the children of this node.  If this node is an [[Elem]], this will return the element's children, otherwise it will return an empty [[Group]] */
+  private[antixml] def children = Group.empty[Node]
+}
 
 private[antixml] object Node {
   // TODO we should probably find a way to propagate custom entities from DTDs
@@ -75,8 +78,9 @@ private[antixml] object Node {
     case '>' => "&gt;"
     case c => List(c)
   }
+  
 }
-
+ 
 /**
  * A processing instruction consisting of a `target` and some `data`.  For example:
  *
@@ -110,14 +114,14 @@ case class ProcInstr(target: String, data: String) extends Node {
  * Elem(None, "span", Attributes("id" -> "foo", "class" -> "bar"), Map(), Group(Text("Lorem ipsum")))
  * }}}
  */
-case class Elem(prefix: Option[String], name: String, attrs: Attributes, scope: Map[String, String], children: Group[Node]) extends Node with Selectable[Elem] {
+case class Elem(prefix: Option[String], name: String, attrs: Attributes, scope: Map[String, String], override val children: Group[Node]) extends Node with Selectable[Elem] {
   import Elem.NameRegex
   
   for (p <- prefix) {
     if (NameRegex.unapplySeq(p).isEmpty) {
       throw new IllegalArgumentException("Illegal element prefix, '" + p + "'")
     }
-  }
+  } 
   
   if (NameRegex.unapplySeq(name).isEmpty) {
     throw new IllegalArgumentException("Illegal element name, '" + name + "'")

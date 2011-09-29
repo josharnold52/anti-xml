@@ -29,10 +29,12 @@
 package com.codecommit
 package antixml
 
+import com.codecommit.antixml.util.VectorCase
 import scala.collection.generic.{CanBuildFrom, HasNewBuilder}
 import scala.collection.immutable.{Vector, VectorBuilder}
 
 trait Selectable[+A <: Node] {
+  import PathCreator.{allChildren, directChildren, PathFunction, PathVal}
   
   /**
    * Performs a shallow-select on the XML tree according to the specified selector
@@ -98,10 +100,8 @@ trait Selectable[+A <: Node] {
    * @see [[com.codecommit.antixml.DeepZipper]]
    * @usecase def \(selector: Selector[Node]): DeepZipper[Node]
    */
-  def \[B, That](selector: Selector[B])(implicit cbf: CanBuildFromWithDeepZipper[Group[_ <: Node], B, That]): That = {
-    import DeepZipper._
-    import PathCreator._
-    fromPathFunc(toGroup, directChildren(selector))
+  def \[B, That](selector: Selector[B])(implicit cbfwz: CanBuildFromWithDeepZipper[Group[A], B, That]): That = {
+    fromPathFunc(directChildren(selector), cbfwz)
   }
   
   /**
@@ -131,11 +131,20 @@ trait Selectable[+A <: Node] {
    * 
    * @usecase def \\(selector: Selector[Node]): DeepZipper[Node]
    */
-  def \\[B, That](selector: Selector[B])(implicit cbfwz: CanBuildFromWithDeepZipper[Group[_ <: Node], B, That]): That = {
-    import DeepZipper._
-    import PathCreator._
-    fromPathFunc(toGroup, allChildren(selector))
+  def \\[B, That](selector: Selector[B])(implicit cbfwz: CanBuildFromWithDeepZipper[Group[A], B, That]): That = {
+    fromPathFunc(allChildren(selector), cbfwz)
   }
+  
+  private def fromPathFunc[B,That](pf: PathFunction[B], cbfwz: CanBuildFromWithDeepZipper[Group[A], B, That]): That = {
+    val grp = toGroup
+    val bld = cbfwz(Some(toZipper), grp)
+    for( PathVal(value, path) <- pf(grp) ) {
+      val withContext = (path, 0, VectorCase(value))
+      bld += withContext
+    }
+    bld.result()
+  }
+  
   
   def toGroup: Group[A]
   

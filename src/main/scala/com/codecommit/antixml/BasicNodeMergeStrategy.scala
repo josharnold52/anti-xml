@@ -6,8 +6,9 @@ import DeepZipper._
  *  
  *  The strategy considers changes that come from children and changes that come
  *  directly from the node separately.
+ * //TODO - 
  */
-private[antixml] object BasicNodeMergeStrategy extends NodeMergeStrategy {
+private[antixml] object BasicNodeMergeStrategy  {
   def apply(node: Node, alternatives: Seq[(Node, Time)]) = {
     val max @ (newestNode, maxUpTime) = alternatives.maxBy(_._2) // by time
 

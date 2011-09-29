@@ -29,13 +29,15 @@
 package com.codecommit.antixml.util
 
 import scala.collection.IndexedSeqLike
-import scala.collection.generic.CanBuildFrom
+import scala.collection.generic.{CanBuildFrom, GenericTraversableTemplate, GenericCompanion}
 import scala.collection.immutable.{IndexedSeq, VectorBuilder}
 import scala.collection.mutable.{ArrayBuffer, Builder}
 
-private[antixml] sealed trait VectorCase[+A] extends IndexedSeq[A] with IndexedSeqLike[A, VectorCase[A]] {
+private[antixml] sealed trait VectorCase[+A] extends IndexedSeq[A] with GenericTraversableTemplate[A, VectorCase] with IndexedSeqLike[A, VectorCase[A]] {
   
   override protected[this] def newBuilder: Builder[A, VectorCase[A]] = VectorCase.newBuilder[A]
+  
+  override def companion = VectorCase
   
   def +:[B >: A](b: B): VectorCase[B]
   def :+[B >: A](b: B): VectorCase[B]
@@ -48,15 +50,16 @@ private[antixml] sealed trait VectorCase[+A] extends IndexedSeq[A] with IndexedS
   def toVector: Vector[A]
 }
 
-private[antixml] object VectorCase {
+private[antixml] object VectorCase extends GenericCompanion[VectorCase] {
   implicit def canBuildFrom[A]: CanBuildFrom[Traversable[_], A, VectorCase[A]] = new CanBuildFrom[Traversable[_], A, VectorCase[A]] {
     def apply() = newBuilder[A]
     def apply(from: Traversable[_]) = newBuilder[A]
   }
   
-  def empty[A] = VectorN[A](Vector.empty)
   
-  def newBuilder[A]: Builder[A, VectorCase[A]] = new Builder[A, VectorCase[A]] { this: Builder[A, VectorCase[A]] =>
+  override def empty[A]: VectorCase[A] = Vector0
+  
+  override def newBuilder[A]: Builder[A, VectorCase[A]] = new Builder[A, VectorCase[A]] { this: Builder[A, VectorCase[A]] =>
     val small = new ArrayBuffer[A](4)
     var builder: VectorBuilder[A] = _
     
@@ -105,7 +108,7 @@ private[antixml] object VectorCase {
     def clear() = this
   }
   
-  def apply[A](as: A*) = fromSeq(as)
+  override def apply[A](as: A*): VectorCase[A] = fromSeq(as)
   
   def fromSeq[A](seq: Seq[A]) = seq match {
     case c: VectorCase[A] => c

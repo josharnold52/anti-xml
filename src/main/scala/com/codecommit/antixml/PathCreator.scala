@@ -1,16 +1,30 @@
 package com.codecommit.antixml
 
-import DeepZipper._
+//import DeepZipper._
+
+import util.VectorCase
+
 
  /** Defines type related to paths on a tree.
   * Also contains factory methods for [[PathFunction]]s  */
 private[antixml] object PathCreator {
 
+  /** The number represents the number of the node in its parent's children list.
+   *  In case the node is root, the number is its position in the group to which it belongs.
+   */
+  private[antixml] type Location = Int
+  
+  private[antixml] case class PathVal[+A](value: A, path: SimplePath)
+  
+  private type ReversedPath = List[Location]
+    
   /** The values from a path function in raw form. */
-  type PathVals[+A] = Seq[(WithLoc[A], ParentsList)]
+  type PathVals[+A] = Seq[(PathVal[A])]
   
   /** A function that creates paths on group, to be used when constructing zippers. */
   type PathFunction[+A] = Group[Node] => PathVals[A]
+  
+  def reverse(rev: ReversedPath): SimplePath = SimplePath(VectorCase(rev.reverse : _*))
   
   /** A path function that selects on nodes in the given group. */
   def fromNodes[A](selector: Selector[A])(nodes: Group[Node]): PathVals[A] = {
@@ -33,15 +47,15 @@ private[antixml] object PathCreator {
   }
   
   /** Collects items from the given group that match the selector. */
-  private def collectGroup[A](nodes: Group[Node], s: Selector[A], p: ParentsList): PathVals[A] = {
+  private def collectGroup[A](nodes: Group[Node], s: Selector[A], p: ReversedPath): PathVals[A] = {
     dispatchSelector(s, nodes) {
       val ni = nodes.zipWithIndex
-      for ((n, i) <- ni if s isDefinedAt n) yield (WithLoc(s(n), i), p)
+      for ((n, i) <- ni if s isDefinedAt n) yield PathVal(s(n),reverse(i :: p))
     }
   }
   
   /** Collects items from the list groups that match the selector. */
-  private def collectGroups[A](groups: Seq[(Group[Node], ParentsList)], s: Selector[A]): PathVals[A] = {
+  private def collectGroups[A](groups: Seq[(Group[Node], ReversedPath)], s: Selector[A]): PathVals[A] = {
     groups flatMap {gp =>
       val (g, p) = gp
       collectGroup(g, s, p)
@@ -50,12 +64,12 @@ private[antixml] object PathCreator {
   
   /** Applies the group selector collection function on the children of the given group. */
   private def collectChildrenOfGroupWith[A]
-	  (nodes: Group[Node], s: Selector[A], p: ParentsList)
-	  (toVals: (Group[Node], Selector[A], ParentsList) => PathVals[A]): PathVals[A] = {
+	  (nodes: Group[Node], s: Selector[A], p: ReversedPath)
+	  (toVals: (Group[Node], Selector[A], ReversedPath) => PathVals[A]): PathVals[A] = {
     dispatchSelector(s, nodes) {
       val ni = nodes.zipWithIndex
       ni flatMap {
-        case (e: Elem, i) => toVals(e.children, s, ParentLoc(e, i) :: p)
+        case (e: Elem, i) => toVals(e.children, s, i :: p)
         case _ => Nil
       }
     }
@@ -67,7 +81,13 @@ private[antixml] object PathCreator {
   }
   
   /** Recursively collects items from the given group that match the selector. */
-  private def collectGroupRecursive[A](groups: Seq[(Group[Node], ParentsList)], s: Selector[A]): PathVals[A] = {
+  private def collectGroupRecursive[A](groups: Seq[(Group[Node], ReversedPath)], s: Selector[A]): PathVals[A] = {
+    /*
+    TODO
+    println("cgr {")
+    for(x <- groups.zipWithIndex) println("  "+x._2+" "+x._1)
+    println("}")
+    */
     if (groups.isEmpty) Nil
     else {
       val allChildren =
@@ -80,11 +100,11 @@ private[antixml] object PathCreator {
   }
   
   /** Gathering all the children of the group that may match the selector. */
-  private def collectGroupChildren(g: Group[Node], p: ParentsList, s: Selector[_]): Seq[(Group[Node], ParentsList)] = {
-    dispatchSelector[Seq[(Group[Node], ParentsList)]](s, g)(Nil) {
+  private def collectGroupChildren(g: Group[Node], p: ReversedPath, s: Selector[_]): Seq[(Group[Node], ReversedPath)] = {
+    dispatchSelector[Seq[(Group[Node], ReversedPath)]](s, g)(Nil) {
       val gi = g.zipWithIndex
       gi flatMap {
-        case (e: Elem, i) => Some((e.children, ParentLoc(e, i) :: p))
+        case (e: Elem, i) => Some((e.children, i :: p))
         case _ => None
       }
     }
@@ -113,17 +133,4 @@ private[antixml] object PathCreator {
     }
   }
 
-  /** A wrapper for path function values, cannot contain duplicate locations. */
-  class Path[+A](vals: PathVals[A]) {
-    private val contexts =
-      vals.map { wp =>
-        val (withLoc, parents) = wp
-        (LocationContext(withLoc.loc, parents, 0), withLoc.content)
-      }
-    
-    /** The location contexts and the corresponding contents. */
-    val (locs, contents) = contexts.unzip
-    // this can only be used if [[Elem]] has efficient hashing
-    require((locs).toSet.size == locs.size, "Cannot have duplicate locations in path") // enforcing no duplicates policy 
-  }
 }
