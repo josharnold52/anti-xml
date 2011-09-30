@@ -12,18 +12,51 @@ import CanBuildFromWithDeepZipper.ElemsWithContext
 
 /** A zipper which allows deep selection.
  *
- *  Zipper instances may be created through factory methods on the companion.
+ * ==Unselection Algorithm==
+ * 
+ * Let G be a group, and Z be a zipper with G as its parent.  For each node, N, in G (top-level or otherwise), we make
+ * the following definitions:
+ * 
+ *  - N ''lies in'' Z if N was matched by the original selection operation that led to the creation the zipper.
+ *  - N ''lies above'' Z if a descendant of N lies in Z
+ *  - For any N that lies in Z, the ''direct updates'' for N are the sequence of nodes that replaced N via update operations on the zipper.
+ *  - For any N that lies above Z, the ''indirect update'' for N is just N with its children flatMapped with the pullback function (defined below).
+ *  - The ''pullback'' of N consists of a sequence of nodes as defined below:
+ *    - If N does not lie in Z, then the pullback of N is the singleton sequence consisting of the indirect update for N
+ *    - If N lies in Z, but does not lie above Z, then the pullback of N is its direct updates. 
+ *    - If N lies in Z ''and'' lies above Z, then the pullback of N is the result of merging its direct updates and its indirect update,
+ * according to the [[com.codecommit.antixml.ZipperMergeStrategy]] passed as an implicit parameter to `unselect`.
+ *
+ * (Strictly speaking, these definitions should be made on the location of N in G rather than on N itself, but we abuse the
+ * terminology for the sake of brevity)
+ *
+ * With the above definitions, the result of `unselect` can be defined simply as G flatMapped with the pullBack function.
+ * 
+ * The last line in the definition of "pullback" deserves special mention because it defines the only condition under which
+ * the [[com.codecommit.antixml.ZipperMergeStrategy]] is invoked. Given zipper Z and parent G, if there exists an N in G such that N lies both in and above Z, 
+ * then Z is said to be ''conflicted at N''.  A zipper without such an N then Z is said to be ''conflict free'' and will never invoke
+ * a ZipperMergeStrategy during unselection. 
+ *
  */
 trait DeepZipper[+A <: Node] extends Group[A] with IndexedSeqLike[A, DeepZipper[A]] { self =>
   
   /** 
-   * A value that is greate than the update time of any node or path in the zipper. Subsequent updates must
+   * A value that is greater than the update time of any node or path in the zipper. Subsequent updates must
    * be tagged with a larger time.
    */
   protected def time: Time
 
-  /** The parent, or None in the case of a "broken" zipper */
-  protected def parent: Option[DeepZipper[Node]]
+  /** 
+   * Returns the original group that was selected upon when the Zipper was created.  A value of `None` indicates that
+   * the Zipper has no parent and `unselect` cannot be called.  This possibility is an unfortunate consequence of the
+   * fact that some operations must return the static type of Zipper even though they yield no usable context.  
+   * In practice, this situation is usually caused by one of the following operations:
+   * 
+   *   - A non-Zipper group is selected upon and then 'unselect' is used to generate an updated group. 
+   *   - A method such as `++`, is used to "add" nodes to a zipper without replacing existing nodes. 
+   *   
+   **/
+  def parent: Option[DeepZipper[Node]]
   
   private def parentOrError = parent getOrElse sys.error("Root has no parent")
 
@@ -31,25 +64,26 @@ trait DeepZipper[+A <: Node] extends Group[A] with IndexedSeqLike[A, DeepZipper[
   protected def metas: IndexedSeq[(Path, Time)]
 
   /** 
-   * Information corresponding to each path in the zipper. The map's values
-   * consist of the last update time for the path, and the indices of the zipper's nodes corresponding
-   * to the path.  Note that a path may have no nodes associated with it, which is why we keep track
-   * of the update time for paths as well as for nodes.
+   * Information corresponding to each path in the zipper. The map's values consist of the indices of the corresponding nodes, 
+   * along with a master update time for the path.  An empty sequence indicates the path has been elided and should be 
+   * removed upon `unselect`.  In this case, the update time indicates the time of elision.
+   * 
+   * The map is sorted lexicographically by the path primarily to facilitate the `isBeneathPath` method.
    */
-  protected def pathIndex: SortedMap[Path,(Time,IndexedSeq[Int])]
+  protected def pathIndex: SortedMap[Path,(IndexedSeq[Int], Time)]
 
   override protected[this] def newBuilder = DeepZipper.newBuilder[A]
   
   override def updated[B >: A <: Node](index: Int, node: B): DeepZipper[B] = {
     val updatedTime = time + 1
     val (updatedPath,_) = metas(index)
-    val (_,updatePathIndices) = pathIndex(updatedPath)
+    val (updatePathIndices,_) = pathIndex(updatedPath)
     
     new Group(super.updated(index, node).toVectorCase) with DeepZipper[B] {
       def parent = self.parent
       val time = updatedTime      
       val metas = self.metas.updated(index, (updatedPath, updatedTime))
-      val pathIndex = self.pathIndex.updated(updatedPath,(updatedTime,updatePathIndices))
+      val pathIndex = self.pathIndex.updated(updatedPath,(updatePathIndices, updatedTime))
     }
   }
 
@@ -92,6 +126,10 @@ trait DeepZipper[+A <: Node] extends Group[A] with IndexedSeqLike[A, DeepZipper[
 
   override def toZipper = this
   
+  /**
+   * Returns a `Group` containing the same nodes as this Zipper, but without any Zipper context, and in particular,
+   * without any implict references to the zipper's parent.
+   */
   def stripZipper = new Group(toVectorCase)
   
   /** A specialized flatMap where the mapping function receives the index of the 
@@ -104,8 +142,8 @@ trait DeepZipper[+A <: Node] extends Group[A] with IndexedSeqLike[A, DeepZipper[
       val (path, _) = metas(index)
       builder += ElemsWithContext[B](path, time+index+1, items)
     }
-    //TODO - Optimize
-    for ( (path,(time,inds)) <- pathIndex) {
+    //Add any paths that had been previously emptied out.  (TODO - Can optimize this)
+    for ( (path,(inds,time)) <- pathIndex) {
       if (inds.isEmpty)
         builder += ElemsWithContext[B](path,time,VectorCase.empty)
     }
@@ -126,17 +164,21 @@ trait DeepZipper[+A <: Node] extends Group[A] with IndexedSeqLike[A, DeepZipper[
     result.getOrElse(false)    
   }
 
-  /** Returns the nodes and update times corresponding to a path lying in the zipper */
-  private def updatesFor(p: Path): (Time, IndexedSeq[(A,Time)]) = {
-    val (time, indices) = pathIndex(p)
-    (time, indices map {x => (self(x), metas(x)._2)})
+  /** 
+   * Returns the direct updates for the specified path.  The result is unspecified  if the path is not contained
+   * in the zipper.  
+   * @return the time of last update to the path followed by a sequence of the direct update nodes and their update times.  
+   **/
+  private def directUpdatesFor(p: Path): (IndexedSeq[(A,Time)], Time) = {
+    val (indices, time) = pathIndex(p)
+    (indices map {x => (self(x), metas(x)._2)}, time)
   }
   
-  /** Applying the node updates. */
+  /** Applies the node updates to the parent and returns the result. */
   def unselect(implicit mergeStrategy: ZipperMergeStrategy): DeepZipper[Node] = {
     //TODO - Should we pull back update times as well as nodes?
     parentOrError flatMapWithIndex {
-      case (node,index) => pullBack(node, VectorCase(index), mergeStrategy)._2
+      case (node,index) => pullBack(node, VectorCase(index), mergeStrategy)._1
     }
   }
     
@@ -144,22 +186,23 @@ trait DeepZipper[+A <: Node] extends Group[A] with IndexedSeqLike[A, DeepZipper[
    * Returns the pullback of a path. 
    * @param node the node that is at the specified path in the zipper's parent
    * @param path the path
-   * @return the replacement nodes along with the path's latest update time.
+   * @return the pullback nodes along with the path's latest update time.
    */
-  private def pullBack(node: Node, path: Path, mergeStrategy: ZipperMergeStrategy): (Time, IndexedSeq[Node]) = node match {
+  private def pullBack(node: Node, path: Path, mergeStrategy: ZipperMergeStrategy): (IndexedSeq[Node], Time) = node match {
     case elem: Elem if isBeneathPath(path) => {
-      val childPullBacks @ (childTime,childGroup) = pullBackChildren(elem.children, path, mergeStrategy)
+      val childPullBacks @ (childGroup, childTime) = pullBackChildren(elem.children, path, mergeStrategy)
+      val indirectUpdate = elem.copy(children = childGroup)
       if (containsPath(path)) {
-        mergeConflicts(node, updatesFor(path), childPullBacks, mergeStrategy)
+        mergeConflicts(elem, directUpdatesFor(path), (indirectUpdate, childTime), mergeStrategy)
       } else {
-        (childTime,VectorCase(elem.copy(children=childGroup)))
+        (VectorCase(indirectUpdate), childTime)
       }
     }
     case _ if containsPath(path) => {
-      val (time,items) = updatesFor(path)
-      (time, items.map(_._1))
+      val (items, time) = directUpdatesFor(path)
+      (items.map(_._1), time)
     }
-    case _ => (0,VectorCase(node))
+    case _ => (VectorCase(node), 0)
   }
 
   /**
@@ -169,34 +212,30 @@ trait DeepZipper[+A <: Node] extends Group[A] with IndexedSeqLike[A, DeepZipper[
    * @return the pullBacks of the path's children, concatenated together, along with the latest update
    * time of the child paths.
    */
-  private def pullBackChildren(nodes: IndexedSeq[Node], path: Path, mergeStrategy: ZipperMergeStrategy): (Time, Group[Node]) = {
-    val pbs = nodes.zipWithIndex.map {
+  private def pullBackChildren(nodes: IndexedSeq[Node], path: Path, mergeStrategy: ZipperMergeStrategy): (Group[Node], Time) = {
+    val childPullbacks = nodes.zipWithIndex.map {
       case (node, index) => pullBack(node, path :+ index, mergeStrategy)
     }
-    val maxTime = pbs.maxBy(_._1)._1
-    (maxTime, pbs.flatMap[Node,Group[Node]](_._2))
+    (childPullbacks.flatMap[Node,Group[Node]](_._1), childPullbacks.maxBy(_._2)._2)
   }
   
-  private def mergeConflicts(node: Node, directPullBacks: (Time,IndexedSeq[(Node,Time)]) , childPullBacks: (Time,Group[Node]), mergeStrategy: ZipperMergeStrategy): (Time, IndexedSeq[Node]) = {
-    val (chTime,chGroup) = childPullBacks
-    val result = directPullBacks._2 map {
-      case (e:Elem,t) if (t<chTime || e.children == node.children) => e.copy(children=chGroup)
-      case (n, _) => n
-    }
-    val rtime = math.max(directPullBacks._1,chTime)
-    (rtime, result)
+  /**
+   * Merges updates at a conflicted node in the tree.  See the unselection algorithm, above, for more information. 
+   * @param node the conflicted node
+   * @param directUpdates the direct updates to `node`.
+   * @param indirectUpdate the indirectUpdate to `node`.
+   * @param mergeStrategy the merge strategy
+   * @return the sequence of nodes to replace `node`, along with an overall update time for `node`.
+   */
+  private def mergeConflicts(node: Elem, directUpdates: (IndexedSeq[(Node,Time)], Time) , indirectUpdate: (Node, Time), mergeStrategy: ZipperMergeStrategy): (IndexedSeq[Node], Time) = {
+    val mergeContext = ZipperMergeContext(original=node, lastDirectUpdate = directUpdates._2, directUpdate = directUpdates._1,
+        indirectUpdate = indirectUpdate)
+     
+    val result = mergeStrategy(mergeContext)
+    (VectorCase.fromSeq(result), math.max(directUpdates._2, indirectUpdate._2))
   }
-  
 }
 
-/** A factory for [[DeepZipper]] instances.
- *  Zippers may be created directly from groups through [[DeepZipper.groupToZipper]] or
- *  through selection using a [[PathFunction]] with [[DeepZipper.fromPath]]/[[DeepZipper.fromPathFunc]]
- *
- *  By importing the implicits in this object any [[Selectable]] can be pimped with
- *  shallow/deep selection methods, which directly take selectors as input.
- *  TODO examples
- */
 object DeepZipper {
     
   import CanBuildFromWithDeepZipper.ElemsWithContext
@@ -236,7 +275,7 @@ object DeepZipper {
       override def parent = None      
       override val time = 0
       override val metas = constant((fakePath,0), nodes.length)
-      override val pathIndex: SortedMap[Path,(Time,IndexedSeq[Int])] = SortedMap( fakePath -> ((0, 0 until nodes.length)))
+      override val pathIndex = SortedMap( fakePath -> (0 until nodes.length, 0))
     }
   }
   
@@ -247,20 +286,20 @@ object DeepZipper {
   
   private class WithDeepZipperBuilder[A <: Node](parent: Option[DeepZipper[Node]]) extends Builder[ElemsWithContext[A],DeepZipper[A]] { self =>
     private val innerBuilder = VectorCase.newBuilder[(Path, Time, A)]
-    private var pathIndex = SortedMap.empty[Path,(Time,IndexedSeq[Int])]
+    private var pathIndex = SortedMap.empty[Path,(IndexedSeq[Int], Time)]
     private var size = 0
     private var maxTime = 0
     
     override def += (ewc: ElemsWithContext[A]) = {      
       val ElemsWithContext(pseq, time, ns) = ewc
       val path = VectorCase.fromSeq(pseq)
-      val items = ns.seq.toSeq.map(x => (VectorCase.fromSeq(path), time, x))(VectorCase.canBuildFrom)
-      //println("+= "+items) //TODO
+
+      val items = ns.seq.toSeq.map(x => (path, time, x))(VectorCase.canBuildFrom)
       innerBuilder ++= items
       
-      val (oldTime,oldInds) = pathIndex.getOrElse(path, (0,VectorCase.empty))
-      val (newTime,newInds) = (math.max(oldTime, time), oldInds ++ (size until (size + items.length)))
-      pathIndex = pathIndex.updated(path, (newTime,newInds))
+      val (oldIndices, oldTime) = pathIndex.getOrElse(path, (VectorCase.empty,0))
+      val (newIndices, newTime) = (math.max(oldTime, time), oldIndices ++ (size until (size + items.length)))
+      pathIndex = pathIndex.updated(path, (newTime,newIndices))
       
       size += items.length
       maxTime = math.max(maxTime, time)
@@ -268,7 +307,7 @@ object DeepZipper {
     }
     override def clear() {
       innerBuilder.clear()
-      pathIndex = SortedMap.empty[Path,(Time,IndexedSeq[Int])]
+      pathIndex = SortedMap.empty
       size = 0
       maxTime = 0
     }

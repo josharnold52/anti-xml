@@ -306,16 +306,13 @@ class Group[+A <: Node] private[antixml] (private[antixml] val nodes: VectorCase
 object Group {
   import DeepZipper.Time
   
-  /** Creates instances of [[CanBuildFromWithDeepZipper]] for [[Group]] types.  
-   * 
-   * *Note*: the [[Builder]] instances provided by the resultant factories will merge
-   * the [[LocationContext]]s passed into them during construction with incoming input.
-   * Any input longer than the number of contexts will be ignored.
+  /** 
+   * Creates instances of [[com.codecommit.antixml.CanBuildFromWithDeepZipper]] for [[com.codecommit.antixml.Group]] types.  
    */
   implicit def canBuildFromWithDeepZipper[A <: Node] = DeepZipper.canBuildFromWithDeepZipper[A]
   
   
-  /** Provides a [[CanBuildFrom]] instance which mixes in [[CanProduceDeepZipper]]  */
+  /** Provides a [[scala.collection.generic.CanBuildFrom]] instance which mixes in [[com.codecommit.antixml.CanProduceDeepZipper]]  */
   implicit def canBuildFromDeep[A <: Node]: CanBuildFrom[Traversable[_], A, Group[A]] = {
     new CanBuildFrom[Traversable[_], A, Group[A]] with CanProduceDeepZipper[Traversable[_], A, DeepZipper[A]] {
       def apply(from: Traversable[_]): Builder[A, Group[A]] = apply()
@@ -325,14 +322,6 @@ object Group {
     }
   }
   
-  /*  //TODO this creates ambiguities with DeepZipper
-  implicit def canBuildFrom[A <: Node]: CanBuildFrom[Group[_], A, Group[A]] = new CanBuildFrom[Group[_], A, Group[A]] with CanProduceZipper[Group[_], A, Zipper[A]] {
-    def apply(from: Group[_]) = apply()
-    def apply() = newBuilder[A]
-    
-    def lift = canBuildFromWithZipper
-  }
-  */
   def newBuilder[A <: Node] = VectorCase.newBuilder[A] mapResult { new Group(_) }
   
   /**

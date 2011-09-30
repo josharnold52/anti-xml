@@ -47,8 +47,8 @@ import java.io.Writer
  *
  * For those that don't find Haskell to be the clearest explanation of what's
  * going on in this type, here is a more natural-language version.  The `Node`
- * trait is sealed and has exactly four subclasses, each implementing a different
- * type of XML node.  These four classes are as follows:
+ * trait is sealed and has exactly five subclasses, each implementing a different
+ * type of XML node.  These five classes are as follows:
  *
  * <ul>
  * <li>[[com.codecommit.antixml.ProcInstr]] – A processing instruction consisting
@@ -64,8 +64,9 @@ import java.io.Writer
  * </ul>
  */
 sealed trait Node {
-  /** Retuns the children of this node.  If this node is an [[Elem]], this will return the element's children, otherwise it will return an empty [[Group]] */
-  private[antixml] def children = Group.empty[Node]
+  /** Returns the children of this node. If the node is an [[com.codecommit.antixml.Elem]], then this method returns the element's children, 
+   * otherwise it returns return an empty [[com.codecommit.antixml.Group]] */
+  def children = Group.empty[Node]
 }
 
 private[antixml] object Node {

@@ -7,11 +7,8 @@ import XML._
 
 class PathCreatorSpecs extends SpecificationWithJUnit {
 
-   //TODO
-   
   "Path values" should {
 
-    /*
     val s = *
 
     "ignore empty groups" in {
@@ -37,19 +34,20 @@ class PathCreatorSpecs extends SpecificationWithJUnit {
 
     val group = Group(x0, x1, x2)
 
-    def ps(pars: (Elem, Int)*) = List(pars.map(ParentLoc.tupled): _*)
-    def nl(n: Node, l: Int) = WithLoc(n, l)
-
-    val root = List((nl(x0, 0), ps()), (nl(x1, 1), ps()), (nl(x2, 2), ps()))
-    val directChild = List(
-      (nl(a0, 0), ps((x0, 0))), (nl(b0, 1), ps((x0, 0))), (nl(c0, 2), ps((x0, 0))),
-      (nl(a1, 0), ps((x1, 1))), (nl(b1, 1), ps((x1, 1))), (nl(c1, 2), ps((x1, 1))),
-      (nl(a2, 0), ps((x2, 2))), (nl(b2, 1), ps((x2, 2))), (nl(c2, 2), ps((x2, 2)))
+    def ps(pars: (Elem, Int)*) = List(pars.map(_._2): _*) //List(pars.map(ParentLoc.tupled): _*)
+    def nl(n: Node, l: Int) = l //WithLoc(n, l)
+    def pv(n: Node, path: Int*) = PathVal(n, Vector(path: _*))
+    
+    val root = Vector(pv(x0,0), pv(x1, 1), pv(x2, 2))
+    val directChild = Vector (
+      pv(a0, 0, 0), pv(b0, 0, 1), pv(c0, 0, 2),
+      pv(a1, 1, 0), pv(b1, 1, 1), pv(c1, 1, 2),
+      pv(a2, 2, 0), pv(b2, 2, 1), pv(c2, 2, 2)
     )
-    val rest = List(
-      (nl(foo0, 0), ps((a0, 0), (x0, 0))), (nl(baz0, 0), ps((b0, 1), (x0, 0))),
-      (nl(foo1, 0), ps((a1, 0), (x1, 1))), (nl(baz1, 0), ps((b1, 1), (x1, 1))),
-      (nl(foo2, 0), ps((a2, 0), (x2, 2))), (nl(baz2, 0), ps((b2, 1), (x2, 2)))
+    val rest = Vector (
+      pv(foo0, 0, 0, 0), pv(baz0, 0, 1, 0),
+      pv(foo1, 1, 0, 0), pv(baz1, 1, 1, 0),
+      pv(foo2, 2, 0, 0), pv(baz2, 2, 1, 0)
     )
 
     "take from the root of the nodes" in {
@@ -61,21 +59,21 @@ class PathCreatorSpecs extends SpecificationWithJUnit {
     }
 
     "take all the nodes recursively, breadth first" in {
-      all(s)(group) mustEqual root ::: directChild ::: rest
+      all(s)(group) mustEqual root ++ directChild ++ rest
     }
 
     "take all children nodes recursively, breadth first" in {
-      allChildren(s)(group) mustEqual directChild ::: rest
+      allChildren(s)(group) mustEqual directChild ++ rest
     }
 
     "apply selectors at the root level" in {
       val sel = Selector({ case Elem(_, "root1", _, _, _) => elem("selected") })
-      fromNodes(sel)(group) mustEqual List((nl(elem("selected"), 1), ps()))
+      fromNodes(sel)(group) mustEqual Vector(pv(elem("selected"), 1)) 
     }
 
     "apply selectors to the children of the root" in {
       val sel = Selector({ case Elem(_, "b2", _, _, _) => elem("selected") })
-      directChildren(sel)(group) mustEqual List((nl(elem("selected"), 1), ps((x2, 2))))
+      directChildren(sel)(group) mustEqual Vector(pv(elem("selected"),2,1))
     }
 
     val selDeep = Selector({
@@ -85,29 +83,24 @@ class PathCreatorSpecs extends SpecificationWithJUnit {
       case Text("baz") => Text("selected")
     })
 
-    val selResRoot = List(
-      (nl(elem("selected"), 2), ps()))
-
+    val selResRoot = Vector(pv(elem("selected"),2))
+                                
     val selResNoRoot = List(
-      (nl(elem("selected"), 2), ps((x1, 1))),
-      (nl(elem("selected"), 1), ps((x2, 2))),
-      (nl(Text("selected"), 0), ps((b0, 1), (x0, 0))),
-      (nl(Text("selected"), 0), ps((b1, 1), (x1, 1))),
-      (nl(Text("selected"), 0), ps((b2, 1), (x2, 2)))
+      pv(elem("selected"),1,2),
+      pv(elem("selected"),2,1),
+      pv(Text("selected"),0,1,0),
+      pv(Text("selected"),1,1,0),
+      pv(Text("selected"),2,1,0)
     )
 
     "apply selectors recursively" in {
-      all(selDeep)(group) mustEqual selResRoot ::: selResNoRoot
+      all(selDeep)(group) mustEqual selResRoot ++ selResNoRoot
     }
 
     "apply selectors recursively on the children" in {
       allChildren(selDeep)(group) mustEqual selResNoRoot
     }
     
-    */
-    "dummy" in {
-      1 mustEqual 1
-    }
   }
   
   
