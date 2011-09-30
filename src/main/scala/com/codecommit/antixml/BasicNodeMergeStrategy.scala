@@ -8,6 +8,7 @@ import DeepZipper._
  *  directly from the node separately.
  * //TODO - 
  */
+ /*
 private[antixml] object BasicNodeMergeStrategy  {
   def apply(node: Node, alternatives: Seq[(Node, Time)]) = {
     val max @ (newestNode, maxUpTime) = alternatives.maxBy(_._2) // by time
@@ -24,10 +25,11 @@ private[antixml] object BasicNodeMergeStrategy  {
       case _ => max // a simple node again
     }
   }
-
+*/
   /** Trying to merge an [[Elem]] with others of the same type, assuming that changes may have propagated from
    *  the children, hence separately merging the children and the rest of the node.
    */
+   /*
   private def mergeElem(origElem: Elem, alternatives: Seq[(Elem, Time)]) = {
     val child = (_: Elem).children;
 
@@ -51,3 +53,4 @@ private[antixml] object BasicNodeMergeStrategy  {
     (maxNonChild.copy(children = maxChild.children), nonChildTime.max(childTime))
   }
 }
+  */

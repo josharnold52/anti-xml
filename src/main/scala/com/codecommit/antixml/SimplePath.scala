@@ -5,6 +5,8 @@ import scala.collection.immutable.Seq
 import scala.math.Ordering
 import util._
 
+/*
+
 private[antixml] case class SimplePath(path: VectorCase[Int]) {
   
   def liesIn(z: DeepZipper[_]) = z.containsPath(this)
@@ -29,3 +31,4 @@ private[antixml] object SimplePath extends (VectorCase[Int] => SimplePath) {
   val empty = SimplePath(VectorCase.empty)
   
 }
+*/

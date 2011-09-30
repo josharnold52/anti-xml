@@ -33,6 +33,8 @@ import com.codecommit.antixml.util.VectorCase
 import scala.collection.generic.{CanBuildFrom, HasNewBuilder}
 import scala.collection.immutable.{Vector, VectorBuilder}
 
+import CanBuildFromWithDeepZipper.ElemsWithContext
+
 trait Selectable[+A <: Node] {
   import PathCreator.{allChildren, directChildren, PathFunction, PathVal}
   
@@ -139,8 +141,7 @@ trait Selectable[+A <: Node] {
     val grp = toGroup
     val bld = cbfwz(Some(toZipper), grp)
     for( PathVal(value, path) <- pf(grp) ) {
-      val withContext = (path, 0, VectorCase(value))
-      bld += withContext
+      bld += ElemsWithContext[B](path, 0, VectorCase(value))
     }
     bld.result()
   }

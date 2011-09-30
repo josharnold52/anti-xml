@@ -1,7 +1,5 @@
 package com.codecommit.antixml
 
-//import DeepZipper._
-
 import util.VectorCase
 
 
@@ -14,17 +12,24 @@ private[antixml] object PathCreator {
    */
   private[antixml] type Location = Int
   
-  private[antixml] case class PathVal[+A](value: A, path: SimplePath)
+  /** The basic result type of a match.
+   * @param value the selector result
+   * @param path the top-down path to the selected node.
+   */
+  private[antixml] case class PathVal[+A](value: A, path: IndexedSeq[Int])
   
-  private type ReversedPath = List[Location]
-    
   /** The values from a path function in raw form. */
   type PathVals[+A] = Seq[(PathVal[A])]
   
   /** A function that creates paths on group, to be used when constructing zippers. */
   type PathFunction[+A] = Group[Node] => PathVals[A]
   
-  def reverse(rev: ReversedPath): SimplePath = SimplePath(VectorCase(rev.reverse : _*))
+  /** Alias for the internal bottom-up path used during selection.  This must be reversed before
+    * being returned in a [[PathVal]].
+    */
+  private type BottomUp = List[Location]
+    
+  private def reverse(rev: BottomUp) = VectorCase.fromSeq(rev.reverse)
   
   /** A path function that selects on nodes in the given group. */
   def fromNodes[A](selector: Selector[A])(nodes: Group[Node]): PathVals[A] = {
@@ -47,7 +52,7 @@ private[antixml] object PathCreator {
   }
   
   /** Collects items from the given group that match the selector. */
-  private def collectGroup[A](nodes: Group[Node], s: Selector[A], p: ReversedPath): PathVals[A] = {
+  private def collectGroup[A](nodes: Group[Node], s: Selector[A], p: BottomUp): PathVals[A] = {
     dispatchSelector(s, nodes) {
       val ni = nodes.zipWithIndex
       for ((n, i) <- ni if s isDefinedAt n) yield PathVal(s(n),reverse(i :: p))
@@ -55,7 +60,7 @@ private[antixml] object PathCreator {
   }
   
   /** Collects items from the list groups that match the selector. */
-  private def collectGroups[A](groups: Seq[(Group[Node], ReversedPath)], s: Selector[A]): PathVals[A] = {
+  private def collectGroups[A](groups: Seq[(Group[Node], BottomUp)], s: Selector[A]): PathVals[A] = {
     groups flatMap {gp =>
       val (g, p) = gp
       collectGroup(g, s, p)
@@ -64,8 +69,8 @@ private[antixml] object PathCreator {
   
   /** Applies the group selector collection function on the children of the given group. */
   private def collectChildrenOfGroupWith[A]
-	  (nodes: Group[Node], s: Selector[A], p: ReversedPath)
-	  (toVals: (Group[Node], Selector[A], ReversedPath) => PathVals[A]): PathVals[A] = {
+	  (nodes: Group[Node], s: Selector[A], p: BottomUp)
+	  (toVals: (Group[Node], Selector[A], BottomUp) => PathVals[A]): PathVals[A] = {
     dispatchSelector(s, nodes) {
       val ni = nodes.zipWithIndex
       ni flatMap {
@@ -81,13 +86,7 @@ private[antixml] object PathCreator {
   }
   
   /** Recursively collects items from the given group that match the selector. */
-  private def collectGroupRecursive[A](groups: Seq[(Group[Node], ReversedPath)], s: Selector[A]): PathVals[A] = {
-    /*
-    TODO
-    println("cgr {")
-    for(x <- groups.zipWithIndex) println("  "+x._2+" "+x._1)
-    println("}")
-    */
+  private def collectGroupRecursive[A](groups: Seq[(Group[Node], BottomUp)], s: Selector[A]): PathVals[A] = {
     if (groups.isEmpty) Nil
     else {
       val allChildren =
@@ -100,8 +99,8 @@ private[antixml] object PathCreator {
   }
   
   /** Gathering all the children of the group that may match the selector. */
-  private def collectGroupChildren(g: Group[Node], p: ReversedPath, s: Selector[_]): Seq[(Group[Node], ReversedPath)] = {
-    dispatchSelector[Seq[(Group[Node], ReversedPath)]](s, g)(Nil) {
+  private def collectGroupChildren(g: Group[Node], p: BottomUp, s: Selector[_]): Seq[(Group[Node], BottomUp)] = {
+    dispatchSelector[Seq[(Group[Node], BottomUp)]](s, g)(Nil) {
       val gi = g.zipWithIndex
       gi flatMap {
         case (e: Elem, i) => Some((e.children, i :: p))
